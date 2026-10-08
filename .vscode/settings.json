@@ -1,0 +1,36 @@
+{
+    "sqltools.connections": [
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "postgreSQL",
+            "database": "EkubCircleDb",
+            "username": "postgress"
+        },
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "postgreSql17",
+            "database": "EkubCircleDb",
+            "username": "postgress"
+        },
+        {
+            "ssh": "Disabled",
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "PostgreSQL 17",
+            "database": "EkubCircleDb",
+            "username": "postgres",
+            "password": "samidan@1010",
+            "connectionTimeout": 30
+        }
+    ]
+}

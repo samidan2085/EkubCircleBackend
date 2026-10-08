@@ -1,0 +1,15 @@
+@EkubCircle.Api_HostAddress = http://localhost:5034
+
+//GET {{EkubCircle.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
+curl http://localhost:5034/api/circles \
+  --request POST \
+  --header 'Accept: */*' \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "name": "Bole Monthly Ekub",
+  "contributionAmount": "5000",
+  "meetingLabel": "Monthly"
+}'
