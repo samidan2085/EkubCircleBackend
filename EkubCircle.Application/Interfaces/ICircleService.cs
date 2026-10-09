@@ -10,8 +10,7 @@ public interface ICircleService
 
     Task<IEnumerable<CircleResponseDto>> GetAllCirclesAsync();
 
-    Task<CircleDetailDto?> GetMyCircleDetailsAsync(
-        string organizerId);
+   Task<CircleDashboardDto?> GetMyCircleDetailsAsync(string organizerId);
 
     Task<CircleDetailDto?> GetCircleAsync(
         Guid circleId);
@@ -24,13 +23,24 @@ public interface ICircleService
     Task<IEnumerable<MemberResponseDto>> GetMembersAsync(
         Guid circleId);
 
-    // Start the Ekub circle
     Task StartCircleAsync(
         Guid circleId,
         string organizerId);
-        Task TogglePaymentAsync(
+
+    Task TogglePaymentAsync(
+        Guid circleId,
+        int roundNumber,
+        string memberId,
+        string organizerId);
+
+    // Organizer dashboard statistics
+    Task<OrganizerDashboardDto?> GetMyDashboardAsync(
+        string organizerId);
+        Task<IEnumerable<CircleTransactionDto>> GetTransactionsAsync(
     Guid circleId,
-    int roundNumber,
-    string memberId,
     string organizerId);
+    Task<MemberDashboardDto?> GetMyMemberDashboardAsync(
+    string userId);
+    Task ResetCircleAsync(Guid circleId, string organizerId);
+ 
 }

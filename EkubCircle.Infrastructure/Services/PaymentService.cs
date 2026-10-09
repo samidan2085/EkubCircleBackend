@@ -1,5 +1,4 @@
 using EkubCircle.Application.Interfaces;
-using EkubCircle.Domain.Entities;
 using EkubCircle.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,93 +17,76 @@ public class PaymentService : IPaymentService
         Guid circleId,
         string memberId)
     {
+        // 1. Find the circle and its current round.
         var circle = await _db.Circles
-            .Include(x => x.Members)
-            .FirstOrDefaultAsync(x => x.Id == circleId);
+            .Include(c => c.Members)
+            .Include(c => c.Rounds)
+                .ThenInclude(r => r.Payments)
+            .FirstOrDefaultAsync(c => c.Id == circleId);
 
-        if (circle == null)
-            throw new KeyNotFoundException(
-                "Circle not found.");
+        if (circle is null)
+            throw new KeyNotFoundException("Circle not found.");
 
-        if (circle.Status == CircleStatus.Completed)
-            throw new InvalidOperationException(
-                "This circle is already completed.");
+        // 2. Verify that the logged-in user belongs to this circle.
+        var membership = circle.Members
+            .FirstOrDefault(m => m.UserId == memberId);
 
-        var member = circle.Members
-            .FirstOrDefault(x => x.UserId == memberId);
-
-        if (member == null)
+        if (membership is null)
             throw new UnauthorizedAccessException(
-                "User is not a member of this circle.");
+                "You are not a member of this circle.");
 
-        var round = await _db.Rounds
-            .Include(x => x.Payments)
-            .FirstOrDefaultAsync(x =>
-                x.CircleId == circleId &&
-                x.RoundNumber == circle.CurrentRoundNumber);
+        // 3. Verify that the circle is active.
+        if (circle.Status != CircleStatus.Active)
+            throw new InvalidOperationException(
+                "This circle is not active.");
 
-        if (round == null)
-        {
-            var receiver = circle.Members
-                .OrderBy(x => x.Position)
-                .FirstOrDefault(x =>
-                    x.Position == circle.CurrentReceiverPosition);
+        // 4. Find the current round.
+        var round = circle.Rounds
+            .FirstOrDefault(r =>
+                r.RoundNumber == circle.CurrentRoundNumber);
 
-            if (receiver == null)
-                throw new InvalidOperationException(
-                    "Receiver could not be determined.");
+        if (round is null)
+            throw new InvalidOperationException(
+                "The current round was not found.");
 
-            round = new Round
-            {
-                Id = Guid.NewGuid(),
-                CircleId = circleId,
-                RoundNumber = circle.CurrentRoundNumber,
-                ReceiverId = receiver.UserId,
-                ContributionAmount = circle.ContributionAmount,
-                PotAmount =
-                    circle.ContributionAmount * circle.MemberCount,
-                Status = RoundStatus.Open
-            };
+        if (round.Status != RoundStatus.Open)
+            throw new InvalidOperationException(
+                "The current round is not open for payments.");
 
-            _db.Rounds.Add(round);
-
-            await _db.SaveChangesAsync();
-        }
-
-        var alreadyPaid = await _db.Payments.AnyAsync(x =>
-            x.RoundId == round.Id &&
-            x.MemberId == memberId);
+        // 5. Prevent duplicate payments.
+        var alreadyPaid = round.Payments
+            .Any(p => p.MemberId == memberId);
 
         if (alreadyPaid)
             throw new InvalidOperationException(
-                "Member has already paid for this round.");
+                "You have already paid for this round.");
 
-        var payment = new Payment
+        // 6. Record the payment.
+        var payment = new EkubCircle.Domain.Entities.Payment
         {
             Id = Guid.NewGuid(),
-            RoundId = round.Id,
             MemberId = memberId,
-            Amount = round.ContributionAmount,
-            PaidAt = DateTime.UtcNow
+            Amount = circle.ContributionAmount,
+            PaidAt = DateTime.UtcNow,
+            RoundId = round.Id
         };
 
         _db.Payments.Add(payment);
 
+        // 7. Update the pot.
+        round.PotAmount += circle.ContributionAmount;
+
         await _db.SaveChangesAsync();
-
-        var paidCount = await _db.Payments.CountAsync(x =>
-            x.RoundId == round.Id);
-
-        var totalMembers = circle.MemberCount;
 
         return new
         {
-            payment.Id,
-            payment.Amount,
-            payment.PaidAt,
-            PaidMembers = paidCount,
-            TotalMembers = totalMembers,
-            AllPaid = paidCount == totalMembers
+            Message = "Payment recorded successfully.",
+            CircleId = circle.Id,
+            RoundNumber = round.RoundNumber,
+            MemberId = memberId,
+            Amount = payment.Amount,
+            PotAmount = round.PotAmount,
+            PaidAt = payment.PaidAt
         };
     }
 }

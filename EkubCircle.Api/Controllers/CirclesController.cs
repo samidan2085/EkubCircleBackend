@@ -32,17 +32,13 @@ if(string.IsNullOrWhiteSpace(userId))
 
     return Created("", result);
 }
-    [HttpGet]
-    [HttpGet]
-public IActionResult GetAll()
+[HttpGet]
+[Authorize(Roles = "Organizer")]
+public async Task<IActionResult> GetAllCircles()
 {
-    return Ok(new
-    {
-        Message = "GET /api/circles works",
-        IsAuthenticated = User.Identity?.IsAuthenticated,
-        UserId = User.FindFirstValue(ClaimTypes.NameIdentifier),
-        Email = User.FindFirstValue(ClaimTypes.Email)
-    });
+    var circles = await _circleService.GetAllCirclesAsync();
+
+    return Ok(circles);
 }
 
     [HttpGet("{circleId:guid}")]
@@ -92,20 +88,22 @@ public IActionResult TestAuth()
 [Authorize(Roles = "Organizer")]
 public async Task<IActionResult> GetMyCircle()
 {
-    var organizerId =
-        User.FindFirstValue(ClaimTypes.NameIdentifier);
+    var organizerId = User.FindFirst(
+        System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
     if (string.IsNullOrWhiteSpace(organizerId))
+    {
         return Unauthorized();
+    }
 
-    var circle =
-        await _circleService.GetMyCircleDetailsAsync(organizerId);
+    var circle = await _circleService
+        .GetMyCircleDetailsAsync(organizerId);
 
-    if (circle == null)
+    if (circle is null)
     {
         return NotFound(new
         {
-            message = "You do not have a circle yet."
+            message = "No circle was found for this Organizer."
         });
     }
 
@@ -193,4 +191,113 @@ public async Task<IActionResult> TogglePayment(
         });
     }
 }
+[HttpGet("my/dashboard")]
+[Authorize(Roles = "Organizer")]
+public async Task<IActionResult> GetMyDashboard()
+{
+    var organizerId = User.FindFirstValue(
+        ClaimTypes.NameIdentifier);
+
+    if (string.IsNullOrWhiteSpace(organizerId))
+    {
+        return Unauthorized();
+    }
+
+    var dashboard = await _circleService.GetMyDashboardAsync(
+        organizerId);
+
+    if (dashboard == null)
+    {
+        return NotFound(new
+        {
+            message = "You do not have a circle yet."
+        });
+    }
+
+    return Ok(dashboard);
+}
+[HttpGet("{circleId:guid}/transactions")]
+[Authorize(Roles = "Organizer")]
+public async Task<IActionResult> GetTransactions(Guid circleId)
+{
+    var organizerId = User.FindFirst(
+        System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+    if (string.IsNullOrWhiteSpace(organizerId))
+    {
+        return Unauthorized();
+    }
+
+    try
+    {
+        var transactions = await _circleService.GetTransactionsAsync(
+            circleId,
+            organizerId);
+
+        return Ok(transactions);
+    }
+    catch (KeyNotFoundException)
+    {
+        return NotFound(new
+        {
+            message = "Circle not found."
+        });
+    }
+}
+[HttpGet("member/my")]
+[Authorize(Roles = "Member")]
+public async Task<IActionResult> GetMyMemberDashboard()
+{
+    var userId = User.FindFirstValue(
+        System.Security.Claims.ClaimTypes.NameIdentifier);
+
+    if (string.IsNullOrWhiteSpace(userId))
+        return Unauthorized();
+
+    var dashboard =
+        await _circleService.GetMyMemberDashboardAsync(userId);
+
+    if (dashboard is null)
+    {
+        return NotFound(new
+        {
+            message = "You have not been assigned to a circle."
+        });
+    }
+
+    return Ok(dashboard);
+}
+[HttpPost("{circleId:guid}/reset")]
+[Authorize(Roles = "Organizer")]
+public async Task<IActionResult> ResetCircle(Guid circleId)
+{
+    var organizerId =
+        User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+    if (string.IsNullOrWhiteSpace(organizerId))
+    {
+        return Unauthorized();
+    }
+
+    try
+    {
+        await _circleService.ResetCircleAsync(
+            circleId,
+            organizerId);
+
+        return Ok(new
+        {
+            message = "Circle reset successfully. You can now add members and start it again."
+        });
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return NotFound(new { message = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return BadRequest(new { message = ex.Message });
+    }
+}
+
 }

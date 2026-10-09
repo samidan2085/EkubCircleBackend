@@ -303,86 +303,63 @@ public class CircleService : ICircleService
     // GET ORGANIZER'S CIRCLE
     // =========================================================
 
-    public async Task<CircleDetailDto?>
-        GetMyCircleDetailsAsync(
-            string organizerId)
+    public async Task<CircleDashboardDto?> GetMyCircleDetailsAsync(
+    string organizerId)
+{
+    var circle = await _db.Circles
+        .AsNoTracking()
+        .Include(c => c.Members)
+            .ThenInclude(m => m.User)
+        .Include(c => c.Rounds)
+            .ThenInclude(r => r.Receiver)
+        .Include(c => c.Rounds)
+            .ThenInclude(r => r.Payments)
+        .FirstOrDefaultAsync(c => c.OrganizerId == organizerId);
+
+    if (circle is null)
     {
-        var circle = await _db.Circles
-            .AsNoTracking()
-
-            .Include(x => x.Members)
-                .ThenInclude(x => x.User)
-
-            .Include(x => x.Rounds)
-                .ThenInclude(x => x.Receiver)
-
-            .Include(x => x.Rounds)
-                .ThenInclude(x => x.Payments)
-
-            .FirstOrDefaultAsync(
-                x => x.OrganizerId == organizerId);
-
-        if (circle == null)
-        {
-            return null;
-        }
-
-        var currentRound = circle.Rounds
-            .FirstOrDefault(
-                x => x.RoundNumber ==
-                     circle.CurrentRoundNumber);
-
-        var members = circle.Members
-            .OrderBy(x => x.Position)
-            .Select(member => new MemberPaymentDto
-            {
-                MemberId = member.UserId,
-
-                FullName =
-                    member.User?.FullName ??
-                    string.Empty,
-
-                HasPaid =
-                    currentRound?.Payments.Any(
-                        payment =>
-                            payment.MemberId ==
-                            member.UserId) ?? false,
-
-                HasReceived =
-                    member.HasReceived
-            })
-            .ToList();
-
-        var rounds = circle.Rounds
-            .OrderBy(x => x.RoundNumber)
-            .Select(round => new RoundInfoDto
-            {
-                RoundNumber =
-                    round.RoundNumber,
-
-                Status =
-                    round.Status.ToString(),
-
-                DesignatedReceiver =
-                    round.Receiver?.FullName ??
-                    string.Empty
-            })
-            .ToList();
-
-        return new CircleDetailDto
-        {
-
-            Name =
-                circle.Name,
-
-            ContributionAmount =
-                circle.ContributionAmount,
-
-            MeetingLabel =
-                circle.MeetingLabel,
-
-        };
+        return null;
     }
+
+    var currentRound = circle.Rounds
+        .FirstOrDefault(r =>
+            r.RoundNumber == circle.CurrentRoundNumber);
+
+    var members = circle.Members
+        .OrderBy(m => m.Position)
+        .Select(m => new MemberPaymentDto
+        {
+            MemberId = m.UserId,
+            FullName = m.User?.FullName ?? "Unknown member",
+            HasPaid = currentRound?.Payments.Any(
+                p => p.MemberId == m.UserId) ?? false,
+            HasReceived = m.HasReceived
+        })
+        .ToList();
+
+    var rounds = circle.Rounds
+        .OrderBy(r => r.RoundNumber)
+        .Select(r => new RoundInfoDto
+        {
+            RoundNumber = r.RoundNumber,
+            Status = r.Status.ToString(),
+            DesignatedReceiver =
+                r.Receiver?.FullName ?? r.ReceiverId
+        })
+        .ToList();
+
+    return new CircleDashboardDto
+    {
+        CircleId = circle.Id,
+        Name = circle.Name,
+        ContributionAmount = circle.ContributionAmount,
+        MeetingLabel = circle.MeetingLabel,
+        Status = circle.Status.ToString(),
+        CurrentRoundNumber = circle.CurrentRoundNumber,
+        Members = members,
+        Rounds = rounds
+    };
+}
     // =========================================================
     // START CIRCLE
     // =========================================================
@@ -644,6 +621,269 @@ public async Task TogglePaymentAsync(
 
     round.PotAmount =
         paidCount * circle.ContributionAmount;
+
+    await _db.SaveChangesAsync();
+}
+// =========================================================
+// ORGANIZER DASHBOARD STATISTICS
+// =========================================================
+
+public async Task<OrganizerDashboardDto?> GetMyDashboardAsync(
+    string organizerId)
+{
+    var circle = await _db.Circles
+        .AsNoTracking()
+        .Include(c => c.Members)
+        .Include(c => c.Rounds)
+            .ThenInclude(r => r.Payments)
+                .ThenInclude(p => p.Member)
+        .FirstOrDefaultAsync(c => c.OrganizerId == organizerId);
+
+    if (circle == null)
+    {
+        return null;
+    }
+
+    var members = circle.Members
+        .OrderBy(m => m.Position)
+        .ToList();
+
+    var rounds = circle.Rounds
+        .OrderBy(r => r.RoundNumber)
+        .ToList();
+
+    var currentRound = rounds.FirstOrDefault(
+        r => r.RoundNumber == circle.CurrentRoundNumber);
+
+    var currentPayments = currentRound?.Payments
+        ?? new List<Payment>();
+
+    var allPayments = rounds
+        .SelectMany(r => r.Payments)
+        .ToList();
+
+    var fundPerformance = rounds
+        .Select(round =>
+        {
+            var paidMembers = round.Payments.Count;
+
+            return new RoundFundPerformanceDto
+            {
+                RoundNumber = round.RoundNumber,
+
+                CollectedAmount = round.Payments.Sum(
+                    payment => payment.Amount),
+
+                ExpectedAmount =
+                    circle.ContributionAmount * members.Count,
+
+                PaidMembers = paidMembers,
+
+                TotalMembers = members.Count,
+
+                Status = round.Status.ToString()
+            };
+        })
+        .ToList();
+
+    var transactions = rounds
+        .SelectMany(round => round.Payments.Select(payment =>
+            new MemberTransactionDto
+            {
+                MemberId = payment.MemberId,
+
+                MemberName =
+                    payment.Member?.FullName ?? "Unknown member",
+
+                RoundNumber = round.RoundNumber,
+
+                Amount = payment.Amount,
+
+                PaidAt = payment.PaidAt
+            }))
+        .OrderByDescending(transaction => transaction.PaidAt)
+        .ToList();
+
+    return new OrganizerDashboardDto
+    {
+        CircleId = circle.Id,
+
+        CircleName = circle.Name,
+
+        ContributionAmount = circle.ContributionAmount,
+
+        MeetingLabel = circle.MeetingLabel,
+
+        CircleStatus = circle.Status.ToString(),
+
+        CurrentRoundNumber = circle.CurrentRoundNumber,
+
+        CurrentRoundFund = currentPayments.Sum(
+            payment => payment.Amount),
+
+        TotalFundValue = allPayments.Sum(
+            payment => payment.Amount),
+
+        // CircleMember currently has no IsActive property.
+        ActiveMembers = members.Count,
+
+        TotalMembers = members.Count,
+
+        CurrentRoundPaidMembers = currentPayments.Count,
+
+        CurrentRoundTotalMembers = members.Count,
+
+        FundPerformance = fundPerformance,
+
+        Transactions = transactions
+    };
+}
+public async Task<IEnumerable<CircleTransactionDto>> GetTransactionsAsync(
+    Guid circleId,
+    string organizerId)
+{
+    var circle = await _db.Circles
+        .AsNoTracking()
+        .FirstOrDefaultAsync(c =>
+            c.Id == circleId &&
+            c.OrganizerId == organizerId);
+
+    if (circle is null)
+    {
+        throw new KeyNotFoundException(
+            "Circle not found or you do not own this circle.");
+    }
+
+    var payments = await _db.Payments
+        .AsNoTracking()
+        .Include(p => p.Member)
+        .Include(p => p.Round)
+        .Where(p => p.Round != null &&
+                    p.Round.CircleId == circleId)
+        .OrderByDescending(p => p.PaidAt)
+        .Select(p => new CircleTransactionDto
+        {
+            PaymentId = p.Id,
+            MemberId = p.MemberId,
+            MemberName = p.Member != null
+                ? p.Member.FullName
+                : "Unknown member",
+            RoundNumber = p.Round!.RoundNumber,
+            Amount = p.Amount,
+            PaidAt = p.PaidAt,
+            Status = "Paid"
+        })
+        .ToListAsync();
+
+    return payments;
+}
+public async Task<MemberDashboardDto?> GetMyMemberDashboardAsync(
+    string userId)
+{
+    var circle = await _db.Circles
+        .AsNoTracking()
+        .Include(c => c.Members)
+            .ThenInclude(m => m.User)
+        .Include(c => c.Rounds)
+            .ThenInclude(r => r.Receiver)
+        .Include(c => c.Rounds)
+            .ThenInclude(r => r.Payments)
+        .FirstOrDefaultAsync(c =>
+            c.Members.Any(m => m.UserId == userId));
+
+    if (circle is null)
+        return null;
+
+    var membership = circle.Members
+        .First(m => m.UserId == userId);
+
+    var round = circle.Rounds
+        .FirstOrDefault(r =>
+            r.RoundNumber == circle.CurrentRoundNumber);
+
+   return new MemberDashboardDto
+{
+    CircleId = circle.Id,
+    CircleName = circle.Name,
+    ContributionAmount = circle.ContributionAmount,
+    MeetingLabel = circle.MeetingLabel,
+    CircleStatus = circle.Status.ToString(),
+
+    CurrentRoundNumber = circle.CurrentRoundNumber,
+    RoundStatus = round?.Status.ToString() ?? "NotStarted",
+    ReceiverName = round?.Receiver?.FullName ?? "Not assigned",
+    PotAmount = round?.PotAmount ?? 0,
+
+    HasPaid = round?.Payments.Any(
+        p => p.MemberId == userId) ?? false,
+
+    HasReceived = membership.HasReceived,
+
+    PaidMemberCount = round?.Payments.Count ?? 0,
+    TotalMemberCount = circle.Members.Count,
+
+    // Show the Organizer and all other members
+    Members = circle.Members
+        .OrderBy(m => m.Position)
+        .Select(m => new MemberPaymentDto
+        {
+            MemberId = m.UserId,
+            FullName = m.User?.FullName ?? "Unknown member",
+
+            HasPaid = round?.Payments.Any(
+                p => p.MemberId == m.UserId) ?? false,
+
+            HasReceived = m.HasReceived
+        })
+        .ToList()
+};
+}
+// =========================================================
+// RESET CIRCLE BEFORE ANY PAYMENTS
+// =========================================================
+
+public async Task ResetCircleAsync(
+    Guid circleId,
+    string organizerId)
+{
+    var circle = await _db.Circles
+        .Include(c => c.Members)
+        .Include(c => c.Rounds)
+            .ThenInclude(r => r.Payments)
+        .FirstOrDefaultAsync(c =>
+            c.Id == circleId &&
+            c.OrganizerId == organizerId);
+
+    if (circle == null)
+    {
+        throw new KeyNotFoundException(
+            "Circle not found.");
+    }
+
+    if (circle.Status != CircleStatus.Active)
+    {
+        throw new InvalidOperationException(
+            "Only an active circle can be reset.");
+    }
+
+    // Never reset after a contribution has been recorded.
+    var hasPayments = circle.Rounds
+        .Any(r => r.Payments.Any());
+
+    if (hasPayments)
+    {
+        throw new InvalidOperationException(
+            "This circle cannot be reset because payments have already been recorded. Finish the circle instead.");
+    }
+
+    // Remove the empty rounds so they can be recreated.
+    _db.Rounds.RemoveRange(circle.Rounds);
+
+    // Return the circle to its forming state.
+    circle.Status = CircleStatus.Forming;
+    circle.CurrentRoundNumber = 1;
+    circle.CurrentReceiverPosition = 1;
+    circle.MemberCount = circle.Members.Count;
 
     await _db.SaveChangesAsync();
 }

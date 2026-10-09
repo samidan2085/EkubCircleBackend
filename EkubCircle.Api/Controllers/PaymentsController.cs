@@ -17,44 +17,33 @@ public class PaymentsController : ControllerBase
     {
         _paymentService = paymentService;
     }
-
     [HttpPost("{circleId:guid}")]
-    public async Task<IActionResult> Pay(
-        Guid circleId)
+public async Task<IActionResult> Pay(Guid circleId)
+{
+    var memberId = User.FindFirstValue(
+        ClaimTypes.NameIdentifier);
+
+    if (string.IsNullOrWhiteSpace(memberId))
+        return Unauthorized();
+
+    try
     {
-        try
-        {
-            var memberId =
-                User.FindFirstValue(
-                    ClaimTypes.NameIdentifier);
+        var result = await _paymentService
+            .RecordPaymentAsync(circleId, memberId);
 
-            if (string.IsNullOrWhiteSpace(memberId))
-                return Unauthorized();
-
-            var result =
-                await _paymentService.RecordPaymentAsync(
-                    circleId,
-                    memberId);
-
-            return Ok(result);
-        }
-        catch (KeyNotFoundException ex)
-        {
-            return NotFound(new
-            {
-                message = ex.Message
-            });
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid();
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new
-            {
-                message = ex.Message
-            });
-        }
+        return Ok(result);
     }
+    catch (KeyNotFoundException ex)
+    {
+        return NotFound(new { message = ex.Message });
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Forbid();
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Conflict(new { message = ex.Message });
+    }
+}
 }
